@@ -7,197 +7,317 @@ import svgwrite
 import sys
 import time
 import copy
+from dataclasses import dataclass
+import math
 
+@dataclass
+class edge:
+    a: list[float]
+    b: list[float]
+    len: float
+    midpoint: list[float] = 'default_factory'
 
+@dataclass
+class circle:
+    coords: list[float]
+    radius: float
 def vprint(v):  # given a list, print all elements in the list
     for x in range(0, len(v)):
         print(v[x])
 
-def ccw(A, B, C):
-    return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+def ccw(a, b, c):
+    return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
 
+def midpoint(n):
+    return ([(n.a[0]+n.b[0])/2, (n.a[1]+n.b[1])/2])
+
+def maxCircle(q, S):
+    R = (-1*((S[0]-q[0])**2)-((S[1]-q[1])**2))/(2.0*(S[0] - q[0]))
+    return R
 
 # Return true if line segments AB and CD intersect
-def intersect(A, B, C, D):
-    return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+def intersect(e):
+    for x in range(0, len(e)-1):
+        for y in range(x+1,len(e)):
+            a = e[x].a
+            b = e[x].b
+            c = e[y].a
+            d = e[y].b
+            if ccw(a, c, d) != ccw(b, c, d) and ccw(a, b, c) != ccw(a, b, d):
+                return True
+    return False
+
+'''
+Determine if there are two set of circles that need to be bridged together, or just one (two circles are in the same
+set if they are touching)
+'''
+def onegroup(r, border):
+    cellsize=0
+    for x in range(len(r)):
+        if r[x].radius > cellsize:
+            cellsize=r[x].radius
+    hashgrid={}
+    for x in range(math.ceil(1.0/cellsize)):
+        for y in range(math.ceil(1.0/cellsize)):
+            hashgrid[(x,y)] = []
+    if border > len(r)/2:
+        for x in range(border-1, len(r)):
+            cell = (r[x].coords[0]//cellsize, r[x].coords[1]//cellsize)
+            hashgrid[cell].append(r[x])
+        for x in range(0,border-1):
+            cell = (r[x].coords[0] // cellsize, r[x].coords[1] // cellsize)
+            if len(hashgrid[cell]) > 0:
+                for y in range(0, len(hashgrid[cell])):
+                    if (dist(hashgrid[cell][y].coords, r[x].coords) - hashgrid[cell][y].radius + r[x].radius) < 0.0001:
+                        return 1
+        return 2
+    else:
+        for x in range(0, border-1):
+            cell = (r[x].coords[0]//cellsize, r[x].coords[1]//cellsize)
+            hashgrid[cell].append(r[x])
+        for x in range(border-1, len(r)):
+            cell = (r[x].coords[0] // cellsize, r[x].coords[1] // cellsize)
+            if len(hashgrid[cell]) > 0:
+                for y in range(0, len(hashgrid[cell])):
+                    if (dist(hashgrid[cell][y].coords, r[x].coords) - hashgrid[cell][y].radius + r[x].radius) < 0.0001:
+                        return 1
+        return 2
+
+'''
+Bridge together the floating set of circles to the set of circles in on the border, so that all of the circles 
+are in the same set
+This is achieved by placing a maximum radius circle on the left of the floating set
+'''
+def bridge(r,border):
+    leftmost=r[0]
+    for x in range(1, border-1):
+        if leftmost.coords[0] > r[x].coords[0]:
+            leftmost=r[x]
+    query=(leftmost.coords[0]-leftmost.radius, leftmost.coords[1])
+    minR=1
+    for x in range(border, len(r)):
+        S=r[x].coords
+        if S[0] < query[0]:
+            R=maxCircle(query, S)
+            print(R)
+            print(r[x])
+            if R < minR:
+                minR= R
+    r.insert(0, circle([query[0]-minR, query[1]], minR))
+    ax = plt.subplot()
+    c = pat.Circle(r[0].coords, radius=minR, color='red')
+    ax.add_patch(c)
 
 
-def plot(vert):  # given list of ordered pairs of verticies, plot lines
-    X = []
-    Y = []
-    for x in range(0, len(vert)):
-        X.append(vert[x][0])
-        Y.append(vert[x][1])
 
-    X.append(vert[0][0])
-    Y.append(vert[0][0])
-    x1 = np.array(X)
-    y1 = np.array(Y)
-    for n in range(1, len(X) - 1):
-        for m in range(n + 1, len(X)):
-            if intersect([X[n - 1], Y[n - 1]], [X[n], Y[n]], [X[m - 1], Y[m - 1]], [X[m], Y[m]]) == True:
-                print("invalid polygon, lines intersect")
-                exit(2)
-    plt.plot(x1, y1)
+def draw(v):
+    x = np.array([])
+    y = np.array([])
+    for n in range(0, len(v)):
+        x = np.append(x, v[n][0])
+        y = np.append(y, v[n][1])
+    x=np.append(x, v[0][0])
+    y=np.append(y,v[0][1])
+    plt.plot(x,y)
+def dist(v1, v2): #given two vertices, determine the distance between them
+    x=abs(v1[0]-v2[0])
+    y=abs(v1[1]-v2[1])
+    return float(np.sqrt((x**2)+(y**2)))
 
 
-def nonincident(v, E):  # given a vertex and the list of edges, remove the incident edges
-    nonI = copy.deepcopy(E)
-    x=len(nonI)-1
-    while x>=0:
-        if v==E[x][0] or v == E[x][1]:
-            nonI.pop(x)
-        x-=1
-    return nonI
+def handle_input():
+    #num = int(input("Enter the number of points in the polygon: "))
+    num=3
+    if num < 3 or num > 20:
+        print("the number of vertices must be between 3 and 20 (inclusive)")
+        sys.exit(1)
+    print("Enter the points of the polygon in order in the form x,y (clockwise order):")
+    v = []
+    '''
+    for x in range(0, num): #converting user input into a list of coordinates
+        coords = input().split(",")
+        coords[0] = float(coords[0])
+        coords[1] = float(coords[1])
+        if (coords[0] > 1 or coords[0] < 0) or (coords[1] > 1 or coords[1] < 0): #checks if the coords are in boundary
+            print("invalid locations for vertices")
+            exit(1)
+        v.append(coords)
+    '''
+    v=[[0.3,0.3],[0.8,0.8],[0.8,0.3]]
+    return v
 
+'''
+given a list of vertices (and an empty list e):
+1. check if the lines defined by the vertices intersects and if so, exit
+2. plot the polygon as well as the corners
+3. extend the list of vertices to include the corners
+4. construct a weighted adjacency matrix representing edges and their lengths
+'''
+def plot(v, e):
+    corners = [[0, 0], [0, 1], [1, 1], [1, 0]]
+    for x in range(1, len(v)):
+        e.append(edge(v[x-1], v[x], dist(v[x-1], v[x])))
+    e.append(edge(v[0], v[-1], dist(v[0], v[-1])))
+    for x in range(1, len(corners)):
+        e.append(edge(corners[x-1], corners[x], 1))
+    e.append(edge(corners[0], corners[-1], 1))
+    if intersect(e):
+        print("Invalid input, lines intersect or vertices in counterclockwise order")
+        exit(1)
+    draw(v)
+    draw(corners)
+    v.extend(corners)
 
-def diskpack1(V, E):
-    # given a list of ordered vertices and a list of edges, define the radius of a circle that is halfway between the
-    # vertex and the nearest non-incident edge for every vertex in the list and return a list of vertex-radius pairs
-    rad = []
-    for v in range(0, len(V)):
+'''
+given a list of ordered vertices and a list of edges, define the radius of a circle that is halfway between the
+vertex and the nearest non-incident edge for every vertex in the list and modify the list r to include these radii
+as well as the coordinates of the vertex that it is centered on
+'''
+def diskpack1(v,e,r):
+    for x in range(0, len(v)):
         n=-1
-        #print("the vertex is:")
-        #vprint(V[v])
-        #print("calling nonincident:\n")
-        NI = nonincident(V[v], E)
-        #print("the list of edges without the vertex: \n")
-        #vprint(NI)
-        vert = np.array(V[v])
-        for e in range(0, len(NI)):
-
-            norm = np.array([NI[e][0][1] - NI[e][1][1], -(NI[e][0][0] - NI[e][1][ 0])])  # normal to the vector from
-            # the point NI[e][1] to the point NI[e][2]
-            A = np.array(NI[e][0])
-            B = np.array(NI[e][1]) #vectors of endpoints of the edge
-            t=(np.dot((vert-A), (B-A))) / ((np.linalg.norm(B-A))**2) #calculate the projection parameter
-            if t<0:
-                r=abs(np.linalg.norm(vert-A)) #the closest point on the edge to the vertex is A
-            elif t>1:
-                r=abs(np.linalg.norm(vert-B)) #the closest point on the edge to the vertex is B
-            else: #otherwise, assume the edge to be an infinite line and use vector projection
-                p = np.array([V[v][0] - NI[e][0][0], V[v][1] - NI[e][0][1]])  # vector from one end of the edge to the vertex
-                r= abs(np.dot(p, norm) / np.linalg.norm(norm)) #vector projection
-            #print("the vertex is " + str(r) + " distance away from the edge ")
-            #vprint(NI[e])
-            if r<n or n==-1: #want the distance of the closest edge to the vertex
-                n=r
-        rad.append([V[v], n/2])
-    return rad
-
-def diskpack2(E,V,R, cov, ucov): #given a list of edges, vertices and the corresponding list of radii of the circles placed on each vertex, split each edge on the point
-    # where the edge of the circle intersects with the edge
-    for x in range(0,len(E)):
-        ucov.append([])
-        for y in range(0,2):
-            print("edge: \n")
-            vprint(E[x])
-            v = np.array([-E[x][y][0]+E[x][(y+1)%2][0], -E[x][y][1]+E[x][(y+1)%2][1]]) #vector from one endpoint to another
-            print("vector: \n")
-            vprint(v)
-            v = (v/np.linalg.norm(v))
-            for z in range(0, len(R)):
-                if R[z][0] == E[x][y]:
-                    v = v * R[z][1]
-                    print("ok\n")
-            v= v + np.array(E[x][y])
-            print("modified vector: \n ")
-            vprint(v)
-            cov.append([E[x][y], [float(v[0]), float(v[1])]])
-            ucov[x].append([float(v[0]),float(v[1])])
-
-def diskpack3(ucov, R): # take the uncovered edges and cover them with diameter disks, splitting if disks overlap
-    crowded=[]
-    midp=[]
-    leng=[]
-    skip=0
-    done=[]
-    while 1:
-        for x in range(0, len(ucov)):
-            midp.append([(ucov[x][0][0]+ucov[x][1][0])/2, (ucov[x][0][1]+ucov[x][1][1])/2]) #midpoint of the edge
-            leng.append(abs(np.linalg.norm(np.array(ucov[x][0]) - np.array(ucov[x][1])))) # length of the edge
-        for x in range(0,len(midp)):
-            for y in range(0, len(midp)):
-                if x == y:
-                    continue
-                dist=abs(np.linalg.norm(np.array(midp[x]) - np.array(midp[y]))) #calculate the distance between the two points
-                if dist < (leng[x] + leng[y]):
-                    crowded.append([ucov[x][0], midp[x]]) #if the diameter disks overlap, split the edge and put it in crowded
-                    crowded.append([ucov[x][1], midp[x]])
-                    skip=1
-                    break
-            if skip==1:
-                skip=0
+        vert = np.array(v[x])
+        vprint(v[x])
+        for y in range(0, len(e)):
+            if e[y].a == v[x] or e[y].b == v[x]:
                 continue
-            for y in range(0, len(R)):
-                dist=abs(np.linalg.norm(np.array(midp[x]) - np.array(R[y][0])))
-                if dist < (leng[x] + R[y][1]):
-                    crowded.append(x)
-                    skip = 1
-                    break
-            if skip==0:
-                done.append(ucov[x])
+                #skip all incident edges
+            norm = np.array([e[y].a[1] - e[y].b[1], -(e[y].a[0] - e[y].b[0])])
+            # normal to the vector between the two points stored in e[y]
+            A = np.array(e[y].a)
+            B = np.array(e[y].b)  # vectors of endpoints of the edge
+            t = (np.dot((vert - A), (B - A))) / ((np.linalg.norm(B - A)) ** 2)
+            # calculate the projection parameter
+            if t < 0:
+                rad = abs(np.linalg.norm(vert - A))
+                # the closest point on the edge to the vertex is A
+            elif t > 1:
+                rad = abs(np.linalg.norm(vert - B))
+                # the closest point on the edge to the vertex is B
 
-        if len(crowded)==0:
-            break
-        ucov.clear()
-        ucov=copy.deepcopy(crowded)
-        crowded.clear()
-        midp.clear()
-        leng.clear()
-    for x in range(0, len(done)):
-        c = pat.Circle((done[x][0][0]+done[x][1][0])/2, (done[x][0][1]+done[x][1][1])/2,
-                       radius=abs(np.linalg.norm(np.array(done[x][0]) - np.array(done[x][1]))), color='yellow')
+            else:
+                # otherwise, assume the edge to be an infinite line and use vector projection
+                p = np.array([v[x][0] - e[y].a[0], v[x][1] - e[y].a[1]])
+                # vector from one end of the edge to the vertex
+                rad = abs(np.dot(p, norm) / np.linalg.norm(norm))
+                # vector projection
+            if rad < n or n == -1:
+                # want the distance of the closest edge to the vertex
+                n = rad
+
+        r.append(circle(v[x], n / 2))
+
+'''
+given a list of ordered vertices, a list of edges, a list of circles, place vertices at the points where the edges 
+meet the border of a circle and add the edges formed between these vertices to the list uc
+'''
+def diskpack2(v,e,r,uc):
+    for x in range(0, len(e)):
+        v1 = np.array([-e[x].a[0] + e[x].b[0], -e[x].a[1] + e[x].b[1]])
+        # vector from one endpoint to another
+        v1 = (v1 / np.linalg.norm(v1))
+        for z in range(0, len(r)):
+            if r[z].coords == e[x].a:
+                v1 = v1 * r[z].radius
+        v1 = v1 + np.array(e[x].a)
+
+        v2 = np.array([-e[x].b[0] + e[x].a[0], -e[x].b[1] + e[x].a[1]])
+        # vector from one endpoint to another
+        v2 = (v2 / np.linalg.norm(v2))
+        for z in range(0, len(r)):
+            if r[z].coords == e[x].b:
+                v2 = v2 * r[z].radius
+        v2 = v2 + np.array(e[x].b)
+
+        uc.append(edge([float(v1[0]),float(v1[1])], [float(v2[0]),float(v2[1])], np.linalg.norm(v1 - v2)))
+        uc[-1].midpoint = midpoint(uc[-1])
+    ax = plt.subplot()
+    for x in range(0, len(uc)):
+        c = pat.Circle(uc[x].a, radius=0.01, color='red')
+        ax.add_patch(c)
+        c = pat.Circle(uc[x].b, radius=0.01, color='red')
         ax.add_patch(c)
 
 
-num = int(input("Enter the number of points in the polygon: "))
-if num < 2:
-    print("not enough vertices were given")
-    sys.exit(1)
-print("Enter the points of the polygon in order in the form x,y:")
-vertices = []
-for x in range(0, num):
-    coords = input().split(",")
-    coords[0] = float(coords[0])
-    coords[1] = float(coords[1])
-    if (coords[0] > 1 or coords[0] < 0) or (coords[1] > 1 or coords[1] < 0):
-        print("invalid locations for vertices")
-        exit(1)
-    vertices.append(coords)
+def diskpack3(r,uc):
+    border=0
+    crowded = []
+    done = []
+    skip=0
+    while 1:
+        for x in range(0, len(uc)):
+            skip=0
+            for y in range(x, len(uc)):
+                if x == y:
+                    continue
 
-vprint(vertices)
-corners = [[0, 0], [0, 1], [1, 1], [1, 0]]
-plot(corners)
-plot(vertices)
+                dist = abs(np.linalg.norm(np.array(uc[x].midpoint) - np.array(uc[y].midpoint)))
 
+                # calculate the distance between the two points
+                if round(dist, 4) < round(uc[x].len/2 + uc[y].len/2, 4):
+                    print(str(round(dist, 3)) + " " + str(round(uc[x].len/2 + uc[y].len/2, 3)))
+                    crowded.append(edge(uc[x].a, uc[x].midpoint, uc[x].len/2))
+                    crowded[-1].midpoint = midpoint(crowded[-1])
+                    # if the diameter disks overlap, split the edge and put it in crowded [ucov[x][0], midp[x]]
+                    crowded.append(edge(uc[x].b, uc[x].midpoint, uc[x].len/2))
+                    crowded[-1].midpoint = midpoint(crowded[-1])
+                    skip = 1
+                    break
+            if skip == 1:
+                continue
+            for y in range(0, len(r)):
+                dist = abs(np.linalg.norm(np.array(uc[x].midpoint) - np.array(r[y].coords)))
+                if round(dist, 4) < round(uc[x].len/2 + r[y].radius, 4):
+                    crowded.append(edge(uc[x].a, uc[x].midpoint, uc[x].len / 2))
+                    crowded[-1].midpoint = midpoint(crowded[-1])
+                    # if the diameter disks overlap, split the edge and put it in crowded [ucov[x][0], midp[x]]
+                    crowded.append(edge(uc[x].b, uc[x].midpoint, uc[x].len / 2))
+                    crowded[-1].midpoint = midpoint(crowded[-1])
+                    skip = 1
+                    break
+            if skip == 0:
+                done.append(uc[x])
 
-edges = []
+        print(len(done))
+        if len(crowded) == 0:
+            break
+        uc.clear()
+        uc = copy.deepcopy(crowded)
+        crowded.clear()
+    ax = plt.subplot()
+    for x in range(0, len(done)):
+        c = pat.Circle((done[x].midpoint[0], done[x].midpoint[1]),
+                       radius=abs(done[x].len / 2), color='yellow')
+        ax.add_patch(c)
 
-for x in range(1, len(vertices)):
-    edges.append([vertices[x - 1], vertices[x]])
+    for x in range(0, len(done)):
+        if (done[x].midpoint[0] in (0,1) or done[x].midpoint[1] in (0,1)):
+            r.append(circle(done[x].midpoint, done[x].len/2))
+            border+=1
+        else:
+            r.insert(0, circle(done[x].midpoint, done[x].len/2))
+    return border
+def diskpack4(r, border):
+    if onegroup(r, border) == 2:
+        bridge(r, border)
 
-edges.append([vertices[0],vertices[len(vertices)-1]])
-for x in range(1, len(corners)):
-    edges.append([corners[x - 1], corners[x]])
+def diskpack(v, e, r):
+    diskpack1(v,e,r)
+    ax = plt.subplot()
+    for x in range(0, len(r)):
+        c = pat.Circle(r[x].coords, radius=r[x].radius, color='blue')
+        ax.add_patch(c)
+    uc=[]
+    diskpack2(v,e,r,uc)
+    border=diskpack3(r,uc)
+    vprint(r)
+    diskpack4(r, border)
 
-edges.append([corners[0],corners[len(corners)-1]])
-#vprint(edges)
-
-vertices.extend(corners) #all the original vertices in PR
-R=diskpack1(vertices, edges)
-ax=plt.subplot()
-# c=pat.Circle((0.5,0.5), radius=0.3, color='blue')
-# ax.add_patch(c)
-
-for x in range(0, len(vertices)):
-    c = pat.Circle((float(vertices[x][0]), float(vertices[x][1])), radius=R[x][1], color='blue')
-    ax.add_patch(c)
-
-UcovE=[] #uncovered edges
-covE=[] #covered edges
-diskpack2(edges,vertices,R, covE, UcovE)
-vprint(covE)
-print("goy \n")
-vprint(UcovE)
+V=handle_input()
+vprint(V)
+E=[]
+plot(V, E)
+R=[]
+diskpack(V, E, R)
+#map_folds(V,E,R)
 plt.show()
